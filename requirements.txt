@@ -1,5 +1,7 @@
 streamlit
-scikit-learn
-pandas
 numpy
+pandas
 matplotlib
+scikit-learn
+tensorflow
+Pillow
