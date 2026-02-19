@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import random
 import matplotlib.pyplot as plt
+from PIL import Image
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.linear_model import LinearRegression
@@ -11,8 +12,13 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 
-st.set_page_config(page_title="Smart Agriculture Advisory", layout="wide")
-st.title("🌾 Smart Agriculture Yield & Advisory System")
+import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from tensorflow.keras.models import Model
+
+st.set_page_config(page_title="Smart Agriculture System", layout="wide")
+st.title("🌾 Smart Agriculture Yield & Leaf Disease Advisory System")
 
 # =====================================================
 # DATASET GENERATION
@@ -65,7 +71,6 @@ for _ in range(3000):
     ) / 10
 
     yield_value = max(1, min(yield_value, 12))
-
     data.append([crop, soil, K, Ca, Mg, Na, P, S, Fe, Zn, Mn, B, yield_value])
 
 columns = ["Crop","Soil","K","Ca","Mg","Na","P","S","Fe","Zn","Mn","B","Yield"]
@@ -108,15 +113,44 @@ for name, model in models.items():
     mae = mean_absolute_error(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
-
     cv_score = cross_val_score(model, X, y, cv=5).mean()
 
     results[name] = r2
-
     metrics_table.append([name, mae, rmse, r2, cv_score])
 
 best_model_name = max(results, key=results.get)
 best_model = models[best_model_name]
+
+# =====================================================
+# LEAF DISEASE MODEL
+# =====================================================
+
+leaf_classes = ["Healthy", "Leaf Blight", "Powdery Mildew", "Leaf Spot"]
+
+base_model = MobileNetV2(
+    weights='imagenet',
+    include_top=False,
+    input_shape=(224,224,3)
+)
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+predictions = Dense(len(leaf_classes), activation='softmax')(x)
+
+leaf_model = Model(inputs=base_model.input, outputs=predictions)
+
+for layer in base_model.layers:
+    layer.trainable = False
+
+def predict_leaf_disease(uploaded_image):
+    img = Image.open(uploaded_image).resize((224,224))
+    img_array = np.array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = tf.keras.applications.mobilenet_v2.preprocess_input(img_array)
+    preds = leaf_model.predict(img_array)
+    predicted_class = leaf_classes[np.argmax(preds)]
+    confidence = np.max(preds) * 100
+    return predicted_class, confidence
 
 # =====================================================
 # USER INPUT SECTION
@@ -162,31 +196,17 @@ if st.button("🔍 Predict Yield & Advisory"):
     input_df = pd.DataFrame([input_data])
     before_yield = best_model.predict(input_df)[0]
 
-    # =====================================================
-    # MODEL PERFORMANCE DISPLAY
-    # =====================================================
+    # ================= Model Performance =================
 
-    st.subheader("📊 Model Performance Evaluation")
-
+    st.subheader("📊 Model Performance")
     metrics_df = pd.DataFrame(
         metrics_table,
         columns=["Model","MAE","RMSE","R2 Score","Cross Val Score"]
     )
-
     st.dataframe(metrics_df)
     st.success(f"Best Model Selected: {best_model_name}")
 
-    # Feature Importance
-    if best_model_name == "Random Forest":
-        st.subheader("📌 Feature Importance (Random Forest)")
-        importances = best_model.feature_importances_
-        fig2, ax2 = plt.subplots()
-        ax2.barh(X.columns, importances)
-        st.pyplot(fig2)
-
-    # =====================================================
-    # ADVISORY SYSTEM
-    # =====================================================
+    # ================= Advisory =================
 
     optimal_means = X.mean()
     suggestions = []
@@ -205,29 +225,46 @@ if st.button("🔍 Predict Yield & Advisory"):
     improvement = ((after_yield - before_yield) / max(before_yield, 0.01)) * 100
     improvement = max(improvement, 0)
 
-    # =====================================================
-    # FARMER REPORT
-    # =====================================================
-
     st.subheader("📋 Farmer Advisory Report")
-
     st.write("**Crop:**", crop_input)
     st.write("**Soil:**", soil_input)
 
     if suggestions:
-        st.write("### Suggested Corrections:")
         for s in suggestions:
             st.write("-", s)
     else:
         st.success("All nutrients are within optimal range.")
 
-    st.write(f"### Yield Before Correction: {round(before_yield,2)} tons/hectare")
-    st.write(f"### Yield After Correction: {round(after_yield,2)} tons/hectare")
-    st.write(f"### Expected Improvement: {round(improvement,2)} %")
+    st.write(f"Yield Before Correction: {round(before_yield,2)} tons/hectare")
+    st.write(f"Yield After Correction: {round(after_yield,2)} tons/hectare")
+    st.write(f"Expected Improvement: {round(improvement,2)} %")
 
     fig, ax = plt.subplots()
-    ax.bar(["Before","After"], [before_yield, after_yield],
-           color=["orange","green"])
+    ax.bar(["Before","After"], [before_yield, after_yield], color=["orange","green"])
     ax.set_ylabel("Yield (tons/hectare)")
     ax.set_title("Yield Improvement Analysis")
     st.pyplot(fig)
+
+    # ================= Leaf Disease Detection =================
+
+    st.subheader("🌿 Leaf Disease Detection")
+    uploaded_file = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg","webp"])
+
+    if uploaded_file is not None:
+        st.image(uploaded_file, caption="Uploaded Leaf Image", use_column_width=True)
+
+        disease, conf = predict_leaf_disease(uploaded_file)
+
+        st.subheader("🌿 Leaf Disease Analysis Report")
+        st.write("Detected Condition:", disease)
+        st.write("Prediction Confidence:", round(conf,2), "%")
+
+        if disease != "Healthy":
+            st.error(f"⚠ DISEASE DETECTED: {disease}")
+            st.write("Recommended Treatment:")
+            st.write("- Apply suitable fungicide")
+            st.write("- Remove infected leaves")
+            st.write("- Improve irrigation management")
+            st.write("- Monitor weekly")
+        else:
+            st.success("Leaf is Healthy. No treatment required.")
