@@ -3,16 +3,21 @@ import numpy as np
 import pandas as pd
 import random
 import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 
 st.set_page_config(page_title="Smart Agriculture Advisory", layout="wide")
 
 st.title("🌾 Smart Agriculture Yield & Advisory System")
 
-# -------------------------
+# =====================================================
 # DATASET GENERATION
-# -------------------------
+# =====================================================
 
 crops = [
     "Rice","Wheat","Maize","Bajra","Jowar","Ragi","Barley",
@@ -67,7 +72,10 @@ for _ in range(3000):
 columns = ["Crop","Soil","K","Ca","Mg","Na","P","S","Fe","Zn","Mn","B","Yield"]
 df = pd.DataFrame(data, columns=columns)
 
-# Encoding
+# =====================================================
+# ENCODING
+# =====================================================
+
 crop_encoder = LabelEncoder()
 soil_encoder = LabelEncoder()
 
@@ -77,14 +85,36 @@ df["Soil"] = soil_encoder.fit_transform(df["Soil"])
 X = df.drop("Yield", axis=1)
 y = df["Yield"]
 
-model = RandomForestRegressor()
-model.fit(X, y)
+# =====================================================
+# MODEL TRAINING & COMPARISON
+# =====================================================
 
-# -------------------------
-# UI SECTION
-# -------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
-st.header("Enter Soil & Nutrient Values")
+models = {
+    "Linear Regression": LinearRegression(),
+    "Decision Tree": DecisionTreeRegressor(random_state=42),
+    "Random Forest": RandomForestRegressor(n_estimators=200, random_state=42)
+}
+
+results = {}
+
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    results[name] = r2
+
+best_model_name = max(results, key=results.get)
+best_model = models[best_model_name]
+
+# =====================================================
+# UI INPUT SECTION
+# =====================================================
+
+st.header("🧪 Enter Soil & Nutrient Values")
 
 col1, col2 = st.columns(2)
 
@@ -104,7 +134,11 @@ with col2:
     Mn = st.number_input("Manganese (ppm)", 0.0)
     B = st.number_input("Boron (ppm)", 0.0)
 
-if st.button("Predict Yield & Advisory"):
+# =====================================================
+# PREDICTION & ADVISORY
+# =====================================================
+
+if st.button("🔍 Predict Yield & Advisory"):
 
     encoded_crop = crop_encoder.transform([crop_input])[0]
     encoded_soil = soil_encoder.transform([soil_input])[0]
@@ -118,14 +152,9 @@ if st.button("Predict Yield & Advisory"):
     }
 
     input_df = pd.DataFrame([input_data])
-    before_yield = model.predict(input_df)[0]
-
-    # -------------------------
-    # ADVISORY LOGIC
-    # -------------------------
+    before_yield = best_model.predict(input_df)[0]
 
     optimal_means = X.mean()
-
     suggestions = []
     corrected_data = input_data.copy()
 
@@ -137,14 +166,28 @@ if st.button("Predict Yield & Advisory"):
             corrected_data[nutrient] = optimal_means[nutrient]
 
     corrected_df = pd.DataFrame([corrected_data])
-    after_yield = model.predict(corrected_df)[0]
+    after_yield = best_model.predict(corrected_df)[0]
 
     improvement = ((after_yield - before_yield) / max(before_yield, 0.01)) * 100
     improvement = max(improvement, 0)
 
-    # -------------------------
-    # DISPLAY REPORT
-    # -------------------------
+    # =====================================================
+    # DISPLAY MODEL PERFORMANCE
+    # =====================================================
+
+    st.subheader("📊 Model Performance Comparison")
+
+    perf_df = pd.DataFrame({
+        "Model": results.keys(),
+        "R2 Score": results.values()
+    })
+
+    st.dataframe(perf_df)
+    st.success(f"Best Model Selected: {best_model_name}")
+
+    # =====================================================
+    # FARMER REPORT
+    # =====================================================
 
     st.subheader("📋 Farmer Advisory Report")
 
@@ -162,12 +205,13 @@ if st.button("Predict Yield & Advisory"):
     st.write(f"### Yield After Correction: {round(after_yield,2)} tons/hectare")
     st.write(f"### Expected Improvement: {round(improvement,2)} %")
 
-    # -------------------------
+    # =====================================================
     # GRAPH
-    # -------------------------
+    # =====================================================
 
     fig, ax = plt.subplots()
-    ax.bar(["Before","After"], [before_yield, after_yield])
+    ax.bar(["Before","After"], [before_yield, after_yield],
+           color=["orange","green"])
     ax.set_ylabel("Yield (tons/hectare)")
     ax.set_title("Yield Improvement Analysis")
     st.pyplot(fig)
