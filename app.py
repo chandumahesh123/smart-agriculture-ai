@@ -12,7 +12,6 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 
 st.set_page_config(page_title="Smart Agriculture Advisory", layout="wide")
-
 st.title("🌾 Smart Agriculture Yield & Advisory System")
 
 # =====================================================
@@ -86,7 +85,7 @@ X = df.drop("Yield", axis=1)
 y = df["Yield"]
 
 # =====================================================
-# MODEL TRAINING & COMPARISON
+# MODEL TRAINING
 # =====================================================
 
 X_train, X_test, y_train, y_test = train_test_split(
@@ -100,18 +99,27 @@ models = {
 }
 
 results = {}
+metrics_table = []
 
 for name, model in models.items():
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
+
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
+
+    cv_score = cross_val_score(model, X, y, cv=5).mean()
+
     results[name] = r2
+
+    metrics_table.append([name, mae, rmse, r2, cv_score])
 
 best_model_name = max(results, key=results.get)
 best_model = models[best_model_name]
 
 # =====================================================
-# UI INPUT SECTION
+# USER INPUT SECTION
 # =====================================================
 
 st.header("🧪 Enter Soil & Nutrient Values")
@@ -135,7 +143,7 @@ with col2:
     B = st.number_input("Boron (ppm)", 0.0)
 
 # =====================================================
-# PREDICTION & ADVISORY
+# PREDICTION
 # =====================================================
 
 if st.button("🔍 Predict Yield & Advisory"):
@@ -154,6 +162,32 @@ if st.button("🔍 Predict Yield & Advisory"):
     input_df = pd.DataFrame([input_data])
     before_yield = best_model.predict(input_df)[0]
 
+    # =====================================================
+    # MODEL PERFORMANCE DISPLAY
+    # =====================================================
+
+    st.subheader("📊 Model Performance Evaluation")
+
+    metrics_df = pd.DataFrame(
+        metrics_table,
+        columns=["Model","MAE","RMSE","R2 Score","Cross Val Score"]
+    )
+
+    st.dataframe(metrics_df)
+    st.success(f"Best Model Selected: {best_model_name}")
+
+    # Feature Importance
+    if best_model_name == "Random Forest":
+        st.subheader("📌 Feature Importance (Random Forest)")
+        importances = best_model.feature_importances_
+        fig2, ax2 = plt.subplots()
+        ax2.barh(X.columns, importances)
+        st.pyplot(fig2)
+
+    # =====================================================
+    # ADVISORY SYSTEM
+    # =====================================================
+
     optimal_means = X.mean()
     suggestions = []
     corrected_data = input_data.copy()
@@ -170,20 +204,6 @@ if st.button("🔍 Predict Yield & Advisory"):
 
     improvement = ((after_yield - before_yield) / max(before_yield, 0.01)) * 100
     improvement = max(improvement, 0)
-
-    # =====================================================
-    # DISPLAY MODEL PERFORMANCE
-    # =====================================================
-
-    st.subheader("📊 Model Performance Comparison")
-
-    perf_df = pd.DataFrame({
-        "Model": results.keys(),
-        "R2 Score": results.values()
-    })
-
-    st.dataframe(perf_df)
-    st.success(f"Best Model Selected: {best_model_name}")
 
     # =====================================================
     # FARMER REPORT
@@ -204,10 +224,6 @@ if st.button("🔍 Predict Yield & Advisory"):
     st.write(f"### Yield Before Correction: {round(before_yield,2)} tons/hectare")
     st.write(f"### Yield After Correction: {round(after_yield,2)} tons/hectare")
     st.write(f"### Expected Improvement: {round(improvement,2)} %")
-
-    # =====================================================
-    # GRAPH
-    # =====================================================
 
     fig, ax = plt.subplots()
     ax.bar(["Before","After"], [before_yield, after_yield],
