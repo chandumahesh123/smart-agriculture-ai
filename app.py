@@ -104,22 +104,70 @@ with col2:
     Mn = st.number_input("Manganese (ppm)", 0.0)
     B = st.number_input("Boron (ppm)", 0.0)
 
-if st.button("Predict Yield"):
+if st.button("Predict Yield & Advisory"):
 
-    temp = {
-        "Crop": crop_encoder.transform([crop_input])[0],
-        "Soil": soil_encoder.transform([soil_input])[0],
+    encoded_crop = crop_encoder.transform([crop_input])[0]
+    encoded_soil = soil_encoder.transform([soil_input])[0]
+
+    input_data = {
+        "Crop": encoded_crop,
+        "Soil": encoded_soil,
         "K": K, "Ca": Ca, "Mg": Mg, "Na": Na,
         "P": P, "S": S, "Fe": Fe, "Zn": Zn,
         "Mn": Mn, "B": B
     }
 
-    input_array = np.array(list(temp.values())).reshape(1,-1)
-    predicted_yield = model.predict(input_array)[0]
+    input_df = pd.DataFrame([input_data])
+    before_yield = model.predict(input_df)[0]
 
-    st.success(f"Estimated Yield: {round(predicted_yield,2)} tons/hectare")
+    # -------------------------
+    # ADVISORY LOGIC
+    # -------------------------
+
+    optimal_means = X.mean()
+
+    suggestions = []
+    corrected_data = input_data.copy()
+
+    for nutrient in ["K","Ca","Mg","P","S","Zn","B"]:
+        if input_data[nutrient] < optimal_means[nutrient]:
+            suggestions.append(
+                f"{nutrient} LOW → Increase to approx {round(optimal_means[nutrient],1)}"
+            )
+            corrected_data[nutrient] = optimal_means[nutrient]
+
+    corrected_df = pd.DataFrame([corrected_data])
+    after_yield = model.predict(corrected_df)[0]
+
+    improvement = ((after_yield - before_yield) / max(before_yield, 0.01)) * 100
+    improvement = max(improvement, 0)
+
+    # -------------------------
+    # DISPLAY REPORT
+    # -------------------------
+
+    st.subheader("📋 Farmer Advisory Report")
+
+    st.write("**Crop:**", crop_input)
+    st.write("**Soil:**", soil_input)
+
+    if suggestions:
+        st.write("### Suggested Corrections:")
+        for s in suggestions:
+            st.write("-", s)
+    else:
+        st.success("All nutrients are within optimal range.")
+
+    st.write(f"### Yield Before Correction: {round(before_yield,2)} tons/hectare")
+    st.write(f"### Yield After Correction: {round(after_yield,2)} tons/hectare")
+    st.write(f"### Expected Improvement: {round(improvement,2)} %")
+
+    # -------------------------
+    # GRAPH
+    # -------------------------
 
     fig, ax = plt.subplots()
-    ax.bar(["Estimated Yield"], [predicted_yield])
+    ax.bar(["Before","After"], [before_yield, after_yield])
     ax.set_ylabel("Yield (tons/hectare)")
+    ax.set_title("Yield Improvement Analysis")
     st.pyplot(fig)
