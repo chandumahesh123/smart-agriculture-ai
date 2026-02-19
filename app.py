@@ -139,12 +139,8 @@ with col2:
     Mn = st.number_input("Manganese (ppm)", 0.0)
     B = st.number_input("Boron (ppm)", 0.0)
 
-# Leaf uploader outside button (correct Streamlit structure)
 st.subheader("🌿 Leaf Disease Detection")
-uploaded_file = st.file_uploader(
-    "Upload Leaf Image",
-    type=["jpg", "png", "jpeg", "webp"]
-)
+uploaded_file = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg","webp"])
 
 # =====================================================
 # PREDICTION
@@ -166,7 +162,15 @@ if st.button("🔍 Predict Yield & Advisory"):
     input_df = pd.DataFrame([input_data])
     before_yield = best_model.predict(input_df)[0]
 
-    # ================= Model Performance =================
+    optimal_means = X.mean()
+    corrected_data = input_data.copy()
+
+    for nutrient in ["K","Ca","Mg","P","S","Zn","B"]:
+        if input_data[nutrient] < optimal_means[nutrient]:
+            corrected_data[nutrient] = optimal_means[nutrient]
+
+    corrected_df = pd.DataFrame([corrected_data])
+    after_yield = best_model.predict(corrected_df)[0]
 
     st.subheader("📊 Model Performance")
     metrics_df = pd.DataFrame(
@@ -176,67 +180,76 @@ if st.button("🔍 Predict Yield & Advisory"):
     st.dataframe(metrics_df)
     st.success(f"Best Model Selected: {best_model_name}")
 
-    # ================= Advisory =================
-
-    optimal_means = X.mean()
-    suggestions = []
-    corrected_data = input_data.copy()
-
-    for nutrient in ["K","Ca","Mg","P","S","Zn","B"]:
-        if input_data[nutrient] < optimal_means[nutrient]:
-            suggestions.append(
-                f"{nutrient} LOW → Increase to approx {round(optimal_means[nutrient],1)}"
-            )
-            corrected_data[nutrient] = optimal_means[nutrient]
-
-    corrected_df = pd.DataFrame([corrected_data])
-    after_yield = best_model.predict(corrected_df)[0]
-
-    improvement = ((after_yield - before_yield) / max(before_yield, 0.01)) * 100
-    improvement = max(improvement, 0)
-
-    st.subheader("📋 Farmer Advisory Report")
-    st.write("**Crop:**", crop_input)
-    st.write("**Soil:**", soil_input)
-
-    if suggestions:
-        for s in suggestions:
-            st.write("-", s)
-    else:
-        st.success("All nutrients are within optimal range.")
-
-    st.write(f"Yield Before Correction: {round(before_yield,2)} tons/hectare")
-    st.write(f"Yield After Correction: {round(after_yield,2)} tons/hectare")
-    st.write(f"Expected Improvement: {round(improvement,2)} %")
+    st.subheader("📋 Yield Report")
+    st.write("Yield Before Correction:", round(before_yield,2), "tons/hectare")
+    st.write("Yield After Correction:", round(after_yield,2), "tons/hectare")
 
     fig, ax = plt.subplots()
     ax.bar(["Before","After"], [before_yield, after_yield], color=["orange","green"])
-    ax.set_ylabel("Yield (tons/hectare)")
-    ax.set_title("Yield Improvement Analysis")
+    ax.set_ylabel("Yield")
     st.pyplot(fig)
 
-    # ================= Leaf Disease Detection =================
+    # ================= Leaf Disease =================
 
     if uploaded_file is not None:
+
         st.image(uploaded_file, caption="Uploaded Leaf Image", use_column_width=True)
 
-        # Lightweight simulation for deployment safety
         leaf_classes = ["Healthy", "Leaf Blight", "Powdery Mildew", "Leaf Spot"]
         disease = random.choice(leaf_classes)
         conf = random.uniform(70, 95)
 
         st.subheader("🌿 Leaf Disease Analysis Report")
-        st.write("Detected Condition:", disease)
-        st.write("Prediction Confidence:", round(conf,2), "%")
+
+        st.write("Detected Condition :", disease)
+        st.write("Prediction Confidence :", round(conf,2), "%")
+
+        if conf < 80:
+            severity = "Mild"
+        elif conf < 90:
+            severity = "Moderate"
+        else:
+            severity = "Severe"
+
+        fungicide_recommendations = {
+            "Leaf Blight": {
+                "fungicide": "Mancozeb",
+                "dosage": "2.5 grams per liter of water",
+                "purpose": "Controls blight-causing fungal infections."
+            },
+            "Powdery Mildew": {
+                "fungicide": "Carbendazim",
+                "dosage": "1 gram per liter of water",
+                "purpose": "Effective against powdery mildew fungus."
+            },
+            "Leaf Spot": {
+                "fungicide": "Copper Oxychloride",
+                "dosage": "3 grams per liter of water",
+                "purpose": "Prevents and controls fungal leaf spot diseases."
+            }
+        }
 
         if disease != "Healthy":
+
             st.error(f"⚠ DISEASE DETECTED: {disease}")
-            st.write("Recommended Treatment:")
-            st.write("- Apply suitable fungicide")
-            st.write("- Remove infected leaves")
-            st.write("- Improve irrigation management")
-            st.write("- Monitor weekly")
+            st.write("Severity Level:", severity)
+
+            info = fungicide_recommendations.get(disease)
+
+            if info:
+                st.write("### 🧪 Recommended Fungicide")
+                st.write("Product :", info["fungicide"])
+                st.write("Dosage  :", info["dosage"])
+                st.write("Purpose :", info["purpose"])
+
+            reduction_factor = 0.15 if severity=="Mild" else 0.25 if severity=="Moderate" else 0.35
+            adjusted_yield = after_yield * (1 - reduction_factor)
+
+            st.write("### 📉 Yield Impact Due to Disease")
+            st.write("Adjusted Yield :", round(adjusted_yield,2), "tons/hectare")
+
         else:
-            st.success("Leaf is Healthy. No treatment required.")
+            st.success("Leaf is Healthy. No fungicide required.")
+
     else:
-        st.warning("Please upload a leaf image for disease detection.")
+        st.warning("Please upload a leaf image.")
