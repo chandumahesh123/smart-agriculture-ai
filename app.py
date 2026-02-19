@@ -10,18 +10,13 @@ from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.linear_model import LinearRegression
-from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.preprocessing import LabelEncoder
 
 st.set_page_config(page_title="Smart Agriculture System", layout="wide")
 st.title("🌾 Smart Agriculture Yield & Leaf Disease Advisory System")
 
 # =====================================================
-# LOAD LEAF MODEL (Cached – Prevent Reload Issue)
+# CACHE LEAF MODEL
 # =====================================================
 
 @st.cache_resource
@@ -63,31 +58,47 @@ def predict_leaf_disease(uploaded_image):
     return predicted_class, confidence
 
 # =====================================================
-# SIMPLE YIELD MODEL (Stable)
+# GENERATE DATASET FOR YIELD
 # =====================================================
 
-df = pd.DataFrame({
-    "K": np.random.randint(80,300,1000),
-    "Ca": np.random.randint(500,40000,1000),
-    "Mg": np.random.randint(1000,16000,1000),
-    "Yield": np.random.uniform(2,6,1000)
-})
+data = []
 
-X = df[["K","Ca","Mg"]]
+for _ in range(2000):
+    K = random.randint(80, 300)
+    Ca = random.randint(500, 40000)
+    Mg = random.randint(1000, 16000)
+    P = random.randint(50, 2500)
+    S = random.randint(50, 2500)
+    Zn = random.randint(5, 300)
+
+    yield_value = (
+        4 + 0.015*K + 0.0004*Ca + 0.001*Mg +
+        0.008*P + 0.004*S + 0.015*Zn
+    ) / 10
+
+    yield_value = max(1, min(yield_value, 12))
+    data.append([K, Ca, Mg, P, S, Zn, yield_value])
+
+df = pd.DataFrame(data, columns=["K","Ca","Mg","P","S","Zn","Yield"])
+
+X = df.drop("Yield", axis=1)
 y = df["Yield"]
 
-model = RandomForestRegressor()
-model.fit(X,y)
+yield_model = RandomForestRegressor()
+yield_model.fit(X,y)
 
 # =====================================================
 # USER INPUT
 # =====================================================
 
-st.header("🧪 Enter Nutrient Values")
+st.header("🧪 Enter Soil Nutrient Values")
 
-K = st.number_input("Potassium", 0.0)
-Ca = st.number_input("Calcium", 0.0)
-Mg = st.number_input("Magnesium", 0.0)
+K = st.number_input("Potassium (ppm)", 0.0)
+Ca = st.number_input("Calcium (ppm)", 0.0)
+Mg = st.number_input("Magnesium (ppm)", 0.0)
+P = st.number_input("Phosphorus (ppm)", 0.0)
+S = st.number_input("Sulfur (ppm)", 0.0)
+Zn = st.number_input("Zinc (ppm)", 0.0)
 
 st.subheader("🌿 Leaf Disease Detection")
 uploaded_file = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg","webp"])
@@ -96,16 +107,40 @@ uploaded_file = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg","
 # BUTTON
 # =====================================================
 
-if st.button("🔍 Predict"):
+if st.button("🔍 Predict Yield & Advisory"):
 
-    # Yield Prediction
-    input_df = pd.DataFrame([[K,Ca,Mg]], columns=["K","Ca","Mg"])
-    predicted_yield = model.predict(input_df)[0]
+    # ---------------- Yield Prediction ----------------
+    input_df = pd.DataFrame([[K,Ca,Mg,P,S,Zn]],
+                            columns=["K","Ca","Mg","P","S","Zn"])
 
-    st.subheader("📋 Yield Prediction")
-    st.write("Predicted Yield:", round(predicted_yield,2), "tons/hectare")
+    before_yield = yield_model.predict(input_df)[0]
 
-    # Leaf Prediction
+    # Simple correction logic
+    corrected_df = input_df.copy()
+
+    means = X.mean()
+
+    for col in corrected_df.columns:
+        if corrected_df[col][0] < means[col]:
+            corrected_df[col] = means[col]
+
+    after_yield = yield_model.predict(corrected_df)[0]
+
+    improvement = ((after_yield - before_yield) / max(before_yield,0.01)) * 100
+
+    st.subheader("📋 Yield Prediction Report")
+    st.write("Yield Before Correction:", round(before_yield,2), "tons/hectare")
+    st.write("Yield After Correction:", round(after_yield,2), "tons/hectare")
+    st.write("Expected Improvement:", round(improvement,2), "%")
+
+    # Yield Graph
+    fig, ax = plt.subplots()
+    ax.bar(["Before","After"], [before_yield, after_yield], color=["orange","green"])
+    ax.set_ylabel("Yield (tons/hectare)")
+    ax.set_title("Yield Improvement Analysis")
+    st.pyplot(fig)
+
+    # ---------------- Leaf Detection ----------------
     if uploaded_file is not None:
 
         st.image(uploaded_file, caption="Uploaded Leaf Image")
@@ -115,6 +150,15 @@ if st.button("🔍 Predict"):
         st.subheader("🌿 Leaf Disease Analysis Report")
         st.write("Detected Condition:", disease)
         st.write("Confidence:", round(conf,2), "%")
+
+        if conf < 80:
+            severity = "Mild"
+        elif conf < 90:
+            severity = "Moderate"
+        else:
+            severity = "Severe"
+
+        st.write("Severity Level:", severity)
 
         if disease != "Healthy":
             st.error("⚠ DISEASE DETECTED")
