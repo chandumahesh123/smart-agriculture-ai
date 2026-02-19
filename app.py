@@ -3,6 +3,12 @@ import numpy as np
 import pandas as pd
 import random
 import matplotlib.pyplot as plt
+from PIL import Image
+
+import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from tensorflow.keras.models import Model
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.linear_model import LinearRegression
@@ -11,6 +17,10 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 
+# Set seeds for consistency
+np.random.seed(42)
+tf.random.set_seed(42)
+
 st.set_page_config(page_title="Smart Agriculture System", layout="wide")
 st.title("🌾 Smart Agriculture Yield & Leaf Disease Advisory System")
 
@@ -18,14 +28,12 @@ st.title("🌾 Smart Agriculture Yield & Leaf Disease Advisory System")
 # DATASET GENERATION
 # =====================================================
 
-crops = [
-    "Rice","Wheat","Maize","Bajra","Jowar","Ragi","Barley",
-    "Chickpea","PigeonPea","Lentil","Mungbean","BlackGram",
-    "Soybean","Groundnut","Mustard","Sunflower","Safflower","Sesame","Castor",
-    "Sugarcane","Cotton","Jute","Tobacco",
-    "Tea","Coffee","Rubber","Coconut","Cashew",
-    "Mango","Banana","Potato","Onion","Tomato","Spices"
-]
+crops = ["Rice","Wheat","Maize","Bajra","Jowar","Ragi","Barley",
+         "Chickpea","PigeonPea","Lentil","Mungbean","BlackGram",
+         "Soybean","Groundnut","Mustard","Sunflower","Safflower",
+         "Sesame","Castor","Sugarcane","Cotton","Jute","Tobacco",
+         "Tea","Coffee","Rubber","Coconut","Cashew",
+         "Mango","Banana","Potato","Onion","Tomato","Spices"]
 
 soils = ["Clay","Sandy","Loamy","Black","Red","Alluvial"]
 
@@ -53,15 +61,9 @@ for _ in range(3000):
         base_yield = 5
 
     yield_value = (
-        base_yield
-        + 0.015*K
-        + 0.0004*Ca
-        + 0.001*Mg
-        - 0.4*Na
-        + 0.008*P
-        + 0.004*S
-        + 0.00005*Fe
-        + 0.015*Zn
+        base_yield + 0.015*K + 0.0004*Ca + 0.001*Mg
+        - 0.4*Na + 0.008*P + 0.004*S
+        + 0.00005*Fe + 0.015*Zn
     ) / 10
 
     yield_value = max(1, min(yield_value, 12))
@@ -116,28 +118,58 @@ best_model_name = max(results, key=results.get)
 best_model = models[best_model_name]
 
 # =====================================================
-# USER INPUT SECTION
+# LEAF DISEASE MODEL (Same as Colab)
+# =====================================================
+
+leaf_classes = ["Healthy", "Leaf Blight", "Powdery Mildew", "Leaf Spot"]
+
+base_model = MobileNetV2(
+    weights='imagenet',
+    include_top=False,
+    input_shape=(224,224,3)
+)
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+predictions = Dense(len(leaf_classes), activation='softmax')(x)
+
+leaf_model = Model(inputs=base_model.input, outputs=predictions)
+
+for layer in base_model.layers:
+    layer.trainable = False
+
+def predict_leaf_disease(uploaded_image):
+
+    img = Image.open(uploaded_image).resize((224,224))
+    img_array = np.array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = tf.keras.applications.mobilenet_v2.preprocess_input(img_array)
+
+    preds = leaf_model.predict(img_array)
+
+    predicted_class = leaf_classes[np.argmax(preds)]
+    confidence = np.max(preds) * 100
+
+    return predicted_class, confidence
+
+# =====================================================
+# USER INPUT
 # =====================================================
 
 st.header("🧪 Enter Soil & Nutrient Values")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    crop_input = st.selectbox("Select Crop", crop_encoder.classes_)
-    soil_input = st.selectbox("Select Soil Type", soil_encoder.classes_)
-    K = st.number_input("Potassium (ppm)", 0.0)
-    Ca = st.number_input("Calcium (ppm)", 0.0)
-    Mg = st.number_input("Magnesium (ppm)", 0.0)
-    Na = st.number_input("Sodium (%)", 0.0)
-
-with col2:
-    P = st.number_input("Phosphorus (ppm)", 0.0)
-    S = st.number_input("Sulfur (ppm)", 0.0)
-    Fe = st.number_input("Iron (ppm)", 0.0)
-    Zn = st.number_input("Zinc (ppm)", 0.0)
-    Mn = st.number_input("Manganese (ppm)", 0.0)
-    B = st.number_input("Boron (ppm)", 0.0)
+crop_input = st.selectbox("Select Crop", crop_encoder.classes_)
+soil_input = st.selectbox("Select Soil Type", soil_encoder.classes_)
+K = st.number_input("Potassium (ppm)", 0.0)
+Ca = st.number_input("Calcium (ppm)", 0.0)
+Mg = st.number_input("Magnesium (ppm)", 0.0)
+Na = st.number_input("Sodium (%)", 0.0)
+P = st.number_input("Phosphorus (ppm)", 0.0)
+S = st.number_input("Sulfur (ppm)", 0.0)
+Fe = st.number_input("Iron (ppm)", 0.0)
+Zn = st.number_input("Zinc (ppm)", 0.0)
+Mn = st.number_input("Manganese (ppm)", 0.0)
+B = st.number_input("Boron (ppm)", 0.0)
 
 st.subheader("🌿 Leaf Disease Detection")
 uploaded_file = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg","webp"])
@@ -151,56 +183,28 @@ if st.button("🔍 Predict Yield & Advisory"):
     encoded_crop = crop_encoder.transform([crop_input])[0]
     encoded_soil = soil_encoder.transform([soil_input])[0]
 
-    input_data = {
+    input_df = pd.DataFrame([{
         "Crop": encoded_crop,
         "Soil": encoded_soil,
         "K": K, "Ca": Ca, "Mg": Mg, "Na": Na,
         "P": P, "S": S, "Fe": Fe, "Zn": Zn,
         "Mn": Mn, "B": B
-    }
+    }])
 
-    input_df = pd.DataFrame([input_data])
     before_yield = best_model.predict(input_df)[0]
 
-    optimal_means = X.mean()
-    corrected_data = input_data.copy()
+    st.subheader("📋 Yield Prediction")
+    st.write("Predicted Yield:", round(before_yield,2), "tons/hectare")
 
-    for nutrient in ["K","Ca","Mg","P","S","Zn","B"]:
-        if input_data[nutrient] < optimal_means[nutrient]:
-            corrected_data[nutrient] = optimal_means[nutrient]
-
-    corrected_df = pd.DataFrame([corrected_data])
-    after_yield = best_model.predict(corrected_df)[0]
-
-    st.subheader("📊 Model Performance")
-    metrics_df = pd.DataFrame(
-        metrics_table,
-        columns=["Model","MAE","RMSE","R2 Score","Cross Val Score"]
-    )
-    st.dataframe(metrics_df)
-    st.success(f"Best Model Selected: {best_model_name}")
-
-    st.subheader("📋 Yield Report")
-    st.write("Yield Before Correction:", round(before_yield,2), "tons/hectare")
-    st.write("Yield After Correction:", round(after_yield,2), "tons/hectare")
-
-    fig, ax = plt.subplots()
-    ax.bar(["Before","After"], [before_yield, after_yield], color=["orange","green"])
-    ax.set_ylabel("Yield")
-    st.pyplot(fig)
-
-    # ================= Leaf Disease =================
+    # ================= Leaf Prediction =================
 
     if uploaded_file is not None:
 
         st.image(uploaded_file, caption="Uploaded Leaf Image", use_column_width=True)
 
-        leaf_classes = ["Healthy", "Leaf Blight", "Powdery Mildew", "Leaf Spot"]
-        disease = random.choice(leaf_classes)
-        conf = random.uniform(70, 95)
+        disease, conf = predict_leaf_disease(uploaded_file)
 
         st.subheader("🌿 Leaf Disease Analysis Report")
-
         st.write("Detected Condition :", disease)
         st.write("Prediction Confidence :", round(conf,2), "%")
 
@@ -214,40 +218,37 @@ if st.button("🔍 Predict Yield & Advisory"):
         fungicide_recommendations = {
             "Leaf Blight": {
                 "fungicide": "Mancozeb",
-                "dosage": "2.5 grams per liter of water",
-                "purpose": "Controls blight-causing fungal infections."
+                "dosage": "2.5 grams per liter",
+                "purpose": "Controls blight-causing fungi."
             },
             "Powdery Mildew": {
                 "fungicide": "Carbendazim",
-                "dosage": "1 gram per liter of water",
+                "dosage": "1 gram per liter",
                 "purpose": "Effective against powdery mildew fungus."
             },
             "Leaf Spot": {
                 "fungicide": "Copper Oxychloride",
-                "dosage": "3 grams per liter of water",
-                "purpose": "Prevents and controls fungal leaf spot diseases."
+                "dosage": "3 grams per liter",
+                "purpose": "Controls fungal leaf spot infections."
             }
         }
 
         if disease != "Healthy":
-
             st.error(f"⚠ DISEASE DETECTED: {disease}")
             st.write("Severity Level:", severity)
 
             info = fungicide_recommendations.get(disease)
-
             if info:
                 st.write("### 🧪 Recommended Fungicide")
                 st.write("Product :", info["fungicide"])
                 st.write("Dosage  :", info["dosage"])
                 st.write("Purpose :", info["purpose"])
 
-            reduction_factor = 0.15 if severity=="Mild" else 0.25 if severity=="Moderate" else 0.35
-            adjusted_yield = after_yield * (1 - reduction_factor)
-
-            st.write("### 📉 Yield Impact Due to Disease")
-            st.write("Adjusted Yield :", round(adjusted_yield,2), "tons/hectare")
-
+            st.write("### 🌿 Additional Treatment Advice")
+            st.write("- Remove infected leaves immediately")
+            st.write("- Avoid overhead irrigation")
+            st.write("- Ensure proper plant spacing")
+            st.write("- Monitor crop weekly")
         else:
             st.success("Leaf is Healthy. No fungicide required.")
 
